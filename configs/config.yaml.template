@@ -1,0 +1,84 @@
+# =============================================================================
+# GeoPep Configuration File - TEMPLATE
+# =============================================================================
+# Copy this file to config.yaml and fill in your paths and tokens
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Preprocessing Settings (PDB → JSON)
+# -----------------------------------------------------------------------------
+preprocess:
+  # Input PDB directories
+  complex_directory: "/path/to/pdb/complex"
+  interface_directory: "/path/to/pdb/interface"
+
+  # Output JSON directory
+  output_directory: "/path/to/json/preprocessed"
+
+  # Number of JSON files to split output into
+  num_json_files: 5
+
+# -----------------------------------------------------------------------------
+# Data Settings
+# -----------------------------------------------------------------------------
+data:
+  # Training data (JSON files from preprocessing)
+  train_json:
+    - "/path/to/json/preprocessed/data_part_1.json"
+    - "/path/to/json/preprocessed/data_part_2.json"
+    - "/path/to/json/preprocessed/data_part_3.json"
+
+  # Validation data
+  val_json:
+    - "/path/to/json/preprocessed/data_part_4.json"
+
+# -----------------------------------------------------------------------------
+# Model Settings
+# -----------------------------------------------------------------------------
+model:
+  peptide_len: 50
+  protein_len: 500
+  num_label_types: 3
+
+# -----------------------------------------------------------------------------
+# Training Settings
+# -----------------------------------------------------------------------------
+training:
+  batch_size: 4
+  learning_rate: 0.0001
+  max_epochs: 100
+  use_distance_loss: true
+
+# -----------------------------------------------------------------------------
+# Prediction Settings
+# -----------------------------------------------------------------------------
+prediction:
+  # Model checkpoint path
+  checkpoint_path: "/path/to/model_weights/model-epoch=01.ckpt"
+
+  # Input JSON file for prediction
+  input_json: "/path/to/json/preprocessed/data_part_5.json"
+
+  # Field name containing input sequence
+  input_field: "combined_chains"
+
+  # Device: "cuda" or "cpu"
+  device: "cuda"
+
+# -----------------------------------------------------------------------------
+# Hardware Settings
+# -----------------------------------------------------------------------------
+hardware:
+  # GPUs to use for training (list of GPU IDs)
+  gpus: [0]
+
+  # Precision: 16 or 32
+  precision: 16
+
+# -----------------------------------------------------------------------------
+# HuggingFace Settings
+# -----------------------------------------------------------------------------
+huggingface:
+  # HuggingFace access token for downloading gated models (e.g., ESM3)
+  # Get your token from: https://huggingface.co/settings/tokens
+  token: "hf_your_token_here"
