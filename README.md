@@ -2,60 +2,60 @@
 
 **Geometric-aware Peptide-Protein Binding Site Prediction**
 
-GeoPep predicts which residues in a protein will bind to a peptide. It combines ESM3 protein foundation model with Kolmogorov-Arnold Networks (KANs).
+GeoPep predicts which residues of a protein bind a given peptide. It combines the **ESM3** protein foundation model with **Kolmogorov-Arnold Networks (KANs)** in a **per-residue** classification head, trained with a differentiable distance loss that injects 3D geometric information.
 
 ---
 
 ## Table of Contents
 
-1. [Installation](#installation)
-2. [Project Structure](#project-structure)
-3. [Configuration](#configuration)
-4. [Complete Pipeline](#complete-pipeline)
-   - [Step 1: Preprocessing](#step-1-preprocessing-pdb--json)
-   - [Step 2: Training](#step-2-training)
-   - [Step 3: Prediction](#step-3-prediction)
-   - [Step 4: Postprocessing](#step-4-postprocessing)
-5. [Data Format](#data-format)
-6. [Troubleshooting](#troubleshooting)
+1. [Quick Start (one command)](#quick-start)
+2. [Installation](#installation)
+3. [Project Structure](#project-structure)
+4. [HuggingFace Token](#huggingface-token)
+5. [Configuration](#configuration)
+6. [End-to-End Pipelines](#end-to-end-pipelines)
+7. [Step-by-Step Usage](#step-by-step-usage)
+8. [Data Format](#data-format)
+9. [Architecture](#architecture)
+10. [Troubleshooting](#troubleshooting)
+
+---
+
+## Quick Start
+
+After [installation](#installation) and [HF token setup](#huggingface-token):
+
+```bash
+cd scripts
+
+# Train a model from a folder of PDBs (folder must contain complex/ and interface/ subdirs)
+python train_pipeline.py --pdb-dir /path/to/pdb
+
+# Run inference on a folder of PDBs using a trained checkpoint
+python inference_pipeline.py \
+    --pdb-dir /path/to/pdb \
+    --checkpoint ../model_weights/model_distanceLoss.ckpt
+```
+
+The training pipeline saves a checkpoint to `model_weights/`. The inference pipeline writes per-residue binding probabilities to `result/predictions.json`.
 
 ---
 
 ## Installation
 
-### 1. Clone the repository
-
 ```bash
-git clone https://github.com/yourusername/GeoPep.git
+git clone https://github.com/Dian0212/GeoPep.git
 cd GeoPep
-```
-
-### 2. Create conda environment (recommended)
-
-```bash
 conda create -n geopep python=3.10
 conda activate geopep
-```
-
-### 3. Install dependencies
-
-```bash
 pip install -r requirements.txt
 ```
 
-### 4. Set up HuggingFace token
+Copy the config template:
 
-The ESM3 model requires HuggingFace authentication:
-
-1. Create an account at https://huggingface.co
-2. Go to https://huggingface.co/settings/tokens
-3. Create a new token with read access
-4. Enable access to gated repositories in your token settings
-5. Add your token to `configs/config.yaml`:
-
-```yaml
-huggingface:
-  token: "hf_your_token_here"
+```bash
+cp configs/config.yaml.template configs/config.yaml
+# Edit configs/config.yaml — only the huggingface.token field is strictly required
 ```
 
 ---
@@ -64,433 +64,265 @@ huggingface:
 
 ```
 GeoPep/
-├── geopep/                    # Main package
-│   ├── models/
-│   │   └── esm3_kan.py        # ESM3 + KAN model definition
+├── geopep/                       # Library code
 │   ├── data/
-│   │   ├── dataset.py         # PyTorch Dataset class
-│   │   └── __init__.py
-│   └── __init__.py
-├── model_weights/             # Trained model checkpoints
-│   └── model-epoch=XX.ckpt
+│   │   ├── __init__.py
+│   │   └── dataset.py            # PeptideComplexDataset (used by train.py)
+│   ├── models/
+│   │   ├── __init__.py
+│   │   └── esm3_kan.py           # ESM3-KAN per-residue model
+│   └── hf_auth.py                # HuggingFace token resolver (env > config > prompt)
+│
+├── scripts/                      # Runnable entry points
+│   ├── preprocess.py             # PDB -> JSON
+│   ├── train.py                  # Single-step trainer
+│   ├── predict_esm3.py           # Single-step inference
+│   ├── postprocess.py            # Softmax -> binary + result JSON / CSV
+│   ├── train_pipeline.py         # ONE COMMAND: PDB folder -> trained model
+│   └── inference_pipeline.py     # ONE COMMAND: PDB folder + ckpt -> predictions.json
+│
 ├── configs/
-│   └── config.yaml            # Single config file for everything
-├── scripts/
-│   ├── preprocess.py          # Step 1: PDB → JSON
-│   ├── train.py               # Step 2: Training
-│   ├── predict_esm3.py        # Step 3: Prediction
-│   └── postprocess.py         # Step 4: Postprocessing
-├── pdb/                       # Input PDB files
-│   ├── complex/               # Full peptide-protein structures
-│   └── interface/             # Interface residues only
-├── json/                      # Preprocessed JSON files
-│   └── preprocessed/
-└── requirements.txt
+│   ├── config.yaml.template      # Tracked: copy this to config.yaml
+│   └── config.yaml               # GITIGNORED: your local copy with your token
+│
+├── model_weights/
+│   ├── README.md
+│   └── model_distanceLoss.ckpt   # Drop your trained checkpoint here (~16 GB)
+│
+├── pdb/                          # Input PDBs
+│   ├── complex/
+│   └── interface/
+├── json/                         # Preprocessed JSON outputs (gitignored)
+├── result/                       # Inference results (gitignored)
+├── requirements.txt
+└── README.md
 ```
+
+---
+
+## HuggingFace Token
+
+**ESM3 is a gated model.** You need a HuggingFace token with access to the `EvolutionaryScale/esm3` repository.
+
+1. Create a token at https://huggingface.co/settings/tokens (Read access is enough)
+2. On the [ESM3 model page](https://huggingface.co/EvolutionaryScale/esm3-sm-open-v1) click "Agree and access repository" while logged in
+3. Provide the token to GeoPep via **one of these methods** (the scripts try them in order):
+
+   **a) Environment variable (recommended for CI / shared machines):**
+   ```bash
+   export HF_TOKEN="hf_xxx..."          # Linux/macOS
+   $env:HF_TOKEN="hf_xxx..."            # PowerShell
+   ```
+
+   **b) Config file (local development):**
+   ```yaml
+   # configs/config.yaml
+   huggingface:
+     token: "hf_xxx..."
+   ```
+   `configs/config.yaml` is **gitignored** — don't worry about leaking it. But never paste a real token into `config.yaml.template` (which IS tracked).
+
+   **c) Interactive prompt:** if neither of the above is set, the script will pause and ask for your token on stdin.
+
+> ⚠️ **If a token has ever appeared in a public git commit, treat it as compromised** — revoke it at https://huggingface.co/settings/tokens and generate a new one.
 
 ---
 
 ## Configuration
 
-All settings are controlled by **one file**: `configs/config.yaml`
+All settings live in `configs/config.yaml` (copy from `config.yaml.template`). Both the one-command pipelines and the individual scripts read from the same file. CLI flags override the relevant fields at runtime.
 
-### Example Configuration
+Key sections:
 
-```yaml
-# =============================================================================
-# GeoPep Configuration File
-# =============================================================================
-
-# -----------------------------------------------------------------------------
-# Preprocessing Settings (PDB → JSON)
-# -----------------------------------------------------------------------------
-preprocess:
-  complex_directory: "E:/path/to/pdb/complex"
-  interface_directory: "E:/path/to/pdb/interface"
-  output_directory: "E:/path/to/json/preprocessed"
-  num_json_files: 5
-
-# -----------------------------------------------------------------------------
-# Data Settings
-# -----------------------------------------------------------------------------
-data:
-  train_json:
-    - "E:/path/to/json/preprocessed/data_part_1.json"
-    - "E:/path/to/json/preprocessed/data_part_2.json"
-    - "E:/path/to/json/preprocessed/data_part_3.json"
-  val_json:
-    - "E:/path/to/json/preprocessed/data_part_4.json"
-
-# -----------------------------------------------------------------------------
-# Model Settings
-# -----------------------------------------------------------------------------
-model:
-  peptide_len: 50
-  protein_len: 500
-  num_label_types: 3
-
-# -----------------------------------------------------------------------------
-# Training Settings
-# -----------------------------------------------------------------------------
-training:
-  batch_size: 4
-  learning_rate: 0.0001
-  max_epochs: 100
-  use_distance_loss: true
-
-# -----------------------------------------------------------------------------
-# Prediction Settings
-# -----------------------------------------------------------------------------
-prediction:
-  checkpoint_path: "E:/path/to/model_weights/model-epoch=01.ckpt"
-  input_json: "E:/path/to/json/preprocessed/data_part_5.json"
-  input_field: "combined_chains"
-  device: "cuda"
-
-# -----------------------------------------------------------------------------
-# Hardware Settings
-# -----------------------------------------------------------------------------
-hardware:
-  gpus: [0]
-  precision: 16
-
-# -----------------------------------------------------------------------------
-# HuggingFace Settings
-# -----------------------------------------------------------------------------
-huggingface:
-  token: "hf_your_token_here"
-```
+| Section | Purpose |
+|---|---|
+| `preprocess.*`     | Paths for PDB → JSON conversion |
+| `data.*`           | train/val JSON shards |
+| `model.*`          | peptide_len (50), protein_len (500), num_label_types (3) |
+| `training.*`       | batch_size, learning_rate, max_epochs, distance loss toggle, `checkpoint_dir` |
+| `prediction.*`     | checkpoint_path, input_json, device (cuda/cpu) |
+| `hardware.*`       | GPU ids, mixed-precision setting |
+| `huggingface.token`| HF token (or leave placeholder and use env var / prompt) |
 
 ---
 
-## Complete Pipeline
+## End-to-End Pipelines
 
-### Step 1: Preprocessing (PDB → JSON)
+### Train pipeline
 
-Converts PDB structure files into JSON format with sequences, labels, and distance maps.
+```bash
+cd scripts
+python train_pipeline.py --pdb-dir /path/to/pdb
+```
 
-#### 1.1 Prepare your PDB files
-
-Organize your PDB files into two directories:
+This runs preprocessing → training → checkpoint save. Required layout:
 
 ```
-pdb/
-├── complex/           # Full peptide-protein structures
-│   ├── 1abc_A_B.pdb   # Naming: PDBID_PeptideChain_ProteinChain.pdb
-│   ├── 1xyz_C_D.pdb
+/path/to/pdb/
+├── complex/                # Full peptide-protein complexes
+│   ├── 1abc_A_B.pdb        # Naming: PDBID_PeptideChain_ProteinChain.pdb
 │   └── ...
-└── interface/         # Interface residues only (same filenames!)
+└── interface/              # Interface-only PDBs (same filenames)
     ├── 1abc_A_B.pdb
-    ├── 1xyz_C_D.pdb
     └── ...
 ```
 
-**Important:**
-- File names must match between `complex/` and `interface/` directories
-- Naming convention: `PDBID_PeptideChain_ProteinChain.pdb`
-- Peptide chain should be listed first, protein chain second
+CLI flags:
 
-#### 1.2 Edit config.yaml
+| Flag | Default | Purpose |
+|---|---|---|
+| `--pdb-dir`         | required             | PDB root folder |
+| `--output-dir`      | `../model_weights`   | Where to save the trained `.ckpt` |
+| `--work-dir`        | `../json/preprocessed` | Intermediate preprocessed JSONs |
+| `--config`          | `../configs/config.yaml` | Base config (hyperparameters, HF token) |
+| `--val-ratio`       | `0.2`                | Fraction of JSON shards used as val |
+| `--skip-preprocess` | off                  | Reuse existing preprocessed JSONs |
 
-```yaml
-preprocess:
-  complex_directory: "E:/Research/2025/drugDesign/code/github/GeoPep/GeoPep/pdb/complex"
-  interface_directory: "E:/Research/2025/drugDesign/code/github/GeoPep/GeoPep/pdb/interface"
-  output_directory: "E:/Research/2025/drugDesign/code/github/GeoPep/GeoPep/json/preprocessed"
-  num_json_files: 5
-```
-
-#### 1.3 Run preprocessing
+### Inference pipeline
 
 ```bash
-cd E:\Research\2025\drugDesign\code\github\GeoPep\GeoPep\scripts
-python preprocess.py
+cd scripts
+python inference_pipeline.py \
+    --pdb-dir /path/to/pdb \
+    --checkpoint ../model_weights/model_distanceLoss.ckpt
 ```
 
-Or with explicit config path:
+Runs preprocessing (inference-only mode — no interface labels needed) → prediction → result JSON. The PDB folder can be flat OR have a `complex/` subdir.
+
+CLI flags:
+
+| Flag | Default | Purpose |
+|---|---|---|
+| `--pdb-dir`         | required             | PDB folder |
+| `--checkpoint`      | required             | Trained model `.ckpt` |
+| `--result-dir`      | `../result`          | Where to write `predictions.json` |
+| `--work-dir`        | `../json/inference`  | Intermediate preprocessed JSON |
+| `--config`          | `../configs/config.yaml` | Base config |
+| `--device`          | from config (cuda)   | `cuda` or `cpu` |
+| `--skip-preprocess` | off                  | Reuse intermediate JSON |
+
+The output is a single `result/predictions.json` keyed by `{pdb_id}_{chain_key}`:
+
+```json
+{
+  "1a1r_C_A": {
+    "peptide_chain": "GSVVIVGRIVLSGKPA",
+    "protein_chain": "VEGEVQIVSTATQTFLAT...",
+    "peptide_bindingProbability": "0.99 0.99 0.99 ...",
+    "protein_bindingProbability": "0.99 0.19 0.01 ..."
+  }
+}
+```
+
+Probability counts match residue counts exactly (padding is stripped). Each value is the **raw class-1 (interface) probability** from the model's softmax.
+
+---
+
+## Step-by-Step Usage
+
+If you prefer running the individual stages (debugging, custom pipelines, etc.):
 
 ```bash
+cd scripts
+
+# 1. Preprocess PDB files to JSON (per-shard splits)
 python preprocess.py --config ../configs/config.yaml
-```
 
-#### 1.4 Output
-
-Creates JSON files in the output directory:
-- `data_part_1.json`, `data_part_2.json`, ..., `data_part_5.json`
-- `error_log.txt` (if any errors occurred)
-
-Each JSON file contains:
-```json
-{
-  "PDBID": {
-    "combined_chains": {
-      "A_B": "PEPTIDESEQ<pad>...|PROTEINSEQ<pad>..."
-    },
-    "posIdx_binary": {
-      "A_B": "0 1 1 0 2 2 ... 3 0 0 1 1 0 2 2 ..."
-    },
-    "distance": {
-      "A_B": [0, 5.2, 3.1, -2, -2, ..., -1, 0, 2.5, ...]
-    }
-  }
-}
-```
-
----
-
-### Step 2: Training
-
-Train the ESM3-KAN model on preprocessed data.
-
-#### 2.1 Edit config.yaml
-
-```yaml
-data:
-  train_json:
-    - "E:/Research/2025/drugDesign/code/github/GeoPep/GeoPep/json/preprocessed/data_part_1.json"
-    - "E:/Research/2025/drugDesign/code/github/GeoPep/GeoPep/json/preprocessed/data_part_2.json"
-    - "E:/Research/2025/drugDesign/code/github/GeoPep/GeoPep/json/preprocessed/data_part_3.json"
-  val_json:
-    - "E:/Research/2025/drugDesign/code/github/GeoPep/GeoPep/json/preprocessed/data_part_4.json"
-
-training:
-  batch_size: 4          # Reduce if GPU memory is limited
-  learning_rate: 0.0001
-  max_epochs: 100        # Number of training epochs
-  use_distance_loss: true  # Enable geometric distance loss
-
-hardware:
-  gpus: [0]              # GPU device ID
-  precision: 16          # Mixed precision (16 or 32)
-```
-
-#### 2.2 Run training
-
-```bash
-cd E:\Research\2025\drugDesign\code\github\GeoPep\GeoPep\scripts
-python train.py
-```
-
-Or with explicit config path:
-
-```bash
+# 2. Train
 python train.py --config ../configs/config.yaml
-```
 
-#### 2.3 Output
-
-Trained model checkpoints are saved to `model_weights/`:
-- `model-epoch=00.ckpt`
-- `model-epoch=01.ckpt`
-- etc.
-
-Training progress is displayed:
-```
-Epoch 0: 100%|████████| 10/10 [03:44<00:00, train_loss=2.930, val_loss=3.200]
-```
-
-#### 2.4 Training Tips
-
-- **GPU Memory**: If you get CUDA out of memory errors, reduce `batch_size`
-- **Training Time**: Each epoch takes ~4 hours on RTX 3090 with small dataset
-- **Checkpoints**: Models are saved every epoch; only best model is kept
-
----
-
-### Step 3: Prediction
-
-Run inference on new data using a trained model.
-
-#### 3.1 Edit config.yaml
-
-```yaml
-prediction:
-  # Path to trained model checkpoint
-  checkpoint_path: "E:/Research/2025/drugDesign/code/github/GeoPep/GeoPep/model_weights/model-epoch=01.ckpt"
-
-  # Input JSON file (from preprocessing or custom)
-  input_json: "E:/Research/2025/drugDesign/code/github/GeoPep/GeoPep/json/preprocessed/data_part_5.json"
-
-  # Field name containing input sequences
-  input_field: "combined_chains"
-
-  # Device: "cuda" or "cpu"
-  device: "cuda"
-```
-
-#### 3.2 Run prediction
-
-```bash
-cd E:\Research\2025\drugDesign\code\github\GeoPep\GeoPep\scripts
-python predict_esm3.py
-```
-
-Or with explicit config path:
-
-```bash
+# 3. Predict (writes model_out_argmax / model_out_softmax back into the input JSON)
 python predict_esm3.py --config ../configs/config.yaml
-```
 
-#### 3.3 Output
-
-Predictions are added to the input JSON file:
-
-```json
-{
-  "PDBID": {
-    "combined_chains": {
-      "A_B": "PEPTIDESEQ<pad>...|PROTEINSEQ<pad>..."
-    },
-    "posIdx_binary": {
-      "A_B": "0 1 1 0 ..."
-    },
-    "model_out_argmax": {
-      "A_B": [0, 1, 1, 0, 2, 2, ..., 0, 0, 1, 1, 0, 2, 2, ...]
-    },
-    "model_out_softmax": {
-      "A_B": [[[0.8, 0.15, 0.05], [0.2, 0.7, 0.1], ...]]
-    }
-  }
-}
-```
-
-**Output fields:**
-- `model_out_argmax`: Predicted class for each position (0, 1, or 2)
-- `model_out_softmax`: Probability scores for each class at each position
-
----
-
-### Step 4: Postprocessing
-
-Converts 3-class predictions to 2-class binary probabilities.
-
-#### 4.1 Run postprocessing
-
-```bash
-cd E:\Research\2025\drugDesign\code\github\GeoPep\GeoPep\scripts
-python postprocess.py --input E:/path/to/predictions.json
-```
-
-#### 4.2 Output
-
-Adds clean binary probabilities to the JSON:
-
-```json
-{
-  "PDBID": {
-    "peptide_out": [[0.8, 0.2], [0.2, 0.8], ...],
-    "protein_out": [[0.9, 0.1], [0.3, 0.7], ...]
-  }
-}
+# 4. Postprocess (optional: CSV per-residue + final result JSON)
+python postprocess.py --input ../json/preprocessed/data_part_5.json --result-dir ../result
+# Or: --output-dir ../csv_output --threshold 0.5  for per-PDB CSVs
 ```
 
 ---
 
 ## Data Format
 
-### Input Sequence Format
+### Input sequence layout
 
 ```
 PEPTIDESEQ<pad><pad>...|PROTEINSEQ<pad><pad>...
-|<----- 50 chars ----->|<------ 500 chars ----->|
+|<------- 50 ------->|<-------- 500 ----------->|
 ```
 
-- Peptide: Maximum 50 residues, padded with `<pad>`
-- Protein: Maximum 500 residues, padded with `<pad>`
-- Separator: `|` character between peptide and protein
+| Position | Content |
+|---|---|
+| 0..49     | Peptide (left-padded with `<pad>` to 50) |
+| 50        | Separator `|` |
+| 51..550   | Protein (left-padded with `<pad>` to 500) |
 
-### Label Format
+### Label encoding (per residue)
 
 | Value | Meaning |
-|-------|---------|
+|---|---|
 | 0 | Non-interface residue |
 | 1 | Interface (binding site) residue |
-| 2 | Padding position |
-| 3 | Separator (between peptide and protein) |
+| 2 | Padding |
+| 3 | Separator |
 
-### Output Positions
+### Distance map
+
+| Value | Meaning |
+|---|---|
+| `0`   | Interface residue itself |
+| `>0`  | Normalized distance (0–10) to the nearest interface residue |
+| `-1`  | Separator |
+| `-2`  | Padding |
+
+---
+
+## Architecture
 
 ```
-Position:  0 -------- 49   50    51 -------- 550
-Content:   [  peptide  ]  [sep]  [   protein   ]
-Label:     [0,1,2 vals ]  [ 3 ]  [ 0,1,2 vals  ]
+input tokens [B, 553]                ← BOS + 551 residue tokens + EOS
+       │
+   ESM3 encoder
+       ↓ embeddings[:, 1:552, :]      drop BOS / EOS
+   [B, 551, 1536]                     per-residue 1536-d embeddings
+       ↓ reshape
+   [B * 551, 1536]                    each residue is an independent sample
+       ↓
+   KAN_model1: 1536 → 1153
+   KAN_model2: 1153 → 770
+   KAN_model3: 770  → 387
+   KAN_model4: 387  → 3
+   KAN_model5: 3    → 3
+       ↓ reshape + permute
+   logits [B, 3, 551]                 3-class logits per residue
+       ↓ softmax(dim=1)
+   binding probability = softmax[:, 1, :]
 ```
 
-### Distance Format
+### Loss = Cross-Entropy + Differentiable Distance Loss
 
-- `0`: Interface residue (distance to interface = 0)
-- `>0`: Non-interface residue (normalized distance to nearest interface, 0-10 scale)
-- `-1`: Separator position
-- `-2`: Padding position
+For each batch, the loss has two terms:
+
+1. **Weighted CE**: per-half cross-entropy with class weights `[0.2, 0.8, 0.0]` (padding ignored).
+2. **Distance loss** (when `use_distance_loss: true`):
+   `L_dist = Σ P_binding(i) · dist(i)  /  num_valid_residues`
+   The model is penalized for predicting "binding" at residues far from the true interface.
+
+Negative distances (padding/separator) are clamped to 0 before this term, and class-2 weight is 0 in CE — so padding positions never contribute gradient.
 
 ---
 
 ## Troubleshooting
 
-### Common Errors
-
-#### 1. HuggingFace Authentication Error
-```
-401 Client Error: Unauthorized
-```
-**Solution:**
-- Check your HuggingFace token in `config.yaml`
-- Enable access to gated repositories in your HuggingFace settings
-
-#### 2. CUDA Out of Memory
-```
-RuntimeError: CUDA out of memory
-```
-**Solution:**
-- Reduce `batch_size` in `config.yaml`
-- Use `precision: 16` for mixed precision training
-
-#### 3. Checkpoint File Corrupted
-```
-RuntimeError: PytorchStreamReader failed reading zip archive
-```
-**Solution:**
-- The checkpoint file is corrupted (likely from interrupted training)
-- Use a different checkpoint file or retrain
-
-#### 4. CUDA Assertion Error
-```
-CUDA error: device-side assert triggered
-```
-**Solution:**
-- Check that `num_label_types: 3` in config.yaml
-- Labels should only contain values 0, 1, 2 (not 3) when computing loss
-
-#### 5. Unicode Decode Error (Windows)
-```
-UnicodeDecodeError: 'gbk' codec can't decode byte
-```
-**Solution:**
-- Already fixed in code with `encoding='utf-8'` parameter
-
----
-
-## Quick Reference Commands
-
-```bash
-# Navigate to scripts directory
-cd E:\Research\2025\drugDesign\code\github\GeoPep\GeoPep\scripts
-
-# Step 1: Preprocess PDB files to JSON
-python preprocess.py
-
-# Step 2: Train the model
-python train.py
-
-# Step 3: Run predictions
-python predict_esm3.py
-
-# Step 4: Postprocess results
-python postprocess.py --input ../json/preprocessed/data_part_5.json
-```
+| Symptom | Fix |
+|---|---|
+| `401 Unauthorized` when downloading ESM3 | Token missing/invalid; re-check the HF token and that you accepted the model's TOS |
+| `RuntimeError: CUDA out of memory` | Reduce `training.batch_size` or use `precision: 16` |
+| `UnicodeEncodeError: 'gbk' codec ...` on Windows | Already mitigated in scripts; if it recurs, set `$env:PYTHONIOENCODING="utf-8"` |
+| `IndexError: list index out of range` in train | Preprocessing produced 0 valid entries — check length filters (peptide ∈ [10, 50], protein ∈ [10, 500]) |
+| Strict `load_state_dict` fails on inference | The checkpoint's KAN layer sizes don't match the inference module; the script falls back to `strict=False` and prints missing/unexpected keys |
 
 ---
 
 ## License
 
-MIT License
+MIT

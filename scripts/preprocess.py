@@ -279,21 +279,26 @@ def calculate_distance_for_entry(pdb_id, combined_chains_key, posIdx_binary_str,
         return None
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Preprocess PDB files to JSON")
-    parser.add_argument("--config", type=str, default="../configs/config.yaml")
-    args = parser.parse_args()
+def run_preprocessing(config):
+    """Run PDB → JSON preprocessing given a parsed config dict.
 
-    with open(args.config, 'r', encoding='utf-8') as f:
-        config = yaml.safe_load(f)
-
+    Returns the list of output JSON file paths produced (data_part_*.json).
+    """
     preprocess_cfg = config['preprocess']
     model_cfg = config['model']
 
     complex_directory_path = preprocess_cfg['complex_directory']
-    interface_directory_path = preprocess_cfg['interface_directory']
+    interface_directory_path = preprocess_cfg.get('interface_directory')
     output_directory = preprocess_cfg['output_directory']
     num_json_files = preprocess_cfg.get('num_json_files', 5)
+
+    # Inference-only mode: skip interface labels and distance maps when no
+    # interface directory is provided / it doesn't exist. The resulting JSON
+    # will contain only `combined_chains`, which is all that predict_esm3.py needs.
+    inference_only = (
+        interface_directory_path is None
+        or not os.path.isdir(interface_directory_path)
+    )
 
     pad_length = [model_cfg.get('peptide_len', 50), model_cfg.get('protein_len', 500)]
     length_threshold = [10, 10]
@@ -305,9 +310,13 @@ def main():
     print("GeoPep Preprocessing")
     print("=" * 60)
     print(f"Complex directory: {complex_directory_path}")
-    print(f"Interface directory: {interface_directory_path}")
+    print(f"Interface directory: {interface_directory_path}"
+          + ("  [missing -> inference-only mode]" if inference_only else ""))
     print(f"Output directory: {output_directory}")
     print(f"Pad length: {pad_length}")
+    if inference_only:
+        print("Mode: INFERENCE-ONLY (combined_chains only; "
+              "skipping posIdx_binary and distance fields)")
     print("=" * 60)
 
     # Error log for distance calculation
@@ -356,38 +365,39 @@ def main():
                 continue
             pdb_dict[pdb_id]['combined_chains'][key] = f"{'|'.join(sequence[chain] for chain in chains_tuple if chain in sequence)}"
 
-        # Extract interface position indices
-        if key not in pdb_dict[pdb_id]['posIdx_interface']:
-            pdb_file_path = os.path.join(interface_directory_path, pdb_file)
-            if os.path.exists(pdb_file_path):
+        if not inference_only:
+            # Extract interface position indices
+            if key not in pdb_dict[pdb_id]['posIdx_interface']:
+                pdb_file_path = os.path.join(interface_directory_path, pdb_file)
+                if os.path.exists(pdb_file_path):
+                    sequence = extract_sequence_posIdx(pdb_file_path, chains_tuple)
+                    pdb_dict[pdb_id]['posIdx_interface'][key] = ' | '.join(sequence[chain] for chain in chains_tuple if chain in sequence)
+                else:
+                    print(f"Interface file not found: {pdb_file_path}")
+                    continue
+
+            # Extract whole complex position indices
+            if key not in pdb_dict[pdb_id]['posIdx_wholeComplex']:
+                pdb_file_path = os.path.join(complex_directory_path, pdb_file)
                 sequence = extract_sequence_posIdx(pdb_file_path, chains_tuple)
-                pdb_dict[pdb_id]['posIdx_interface'][key] = ' | '.join(sequence[chain] for chain in chains_tuple if chain in sequence)
-            else:
-                print(f"Interface file not found: {pdb_file_path}")
-                continue
+                pdb_dict[pdb_id]['posIdx_wholeComplex'][key] = ' | '.join(sequence[chain] for chain in chains_tuple if chain in sequence)
 
-        # Extract whole complex position indices
-        if key not in pdb_dict[pdb_id]['posIdx_wholeComplex']:
-            pdb_file_path = os.path.join(complex_directory_path, pdb_file)
-            sequence = extract_sequence_posIdx(pdb_file_path, chains_tuple)
-            pdb_dict[pdb_id]['posIdx_wholeComplex'][key] = ' | '.join(sequence[chain] for chain in chains_tuple if chain in sequence)
+            # Generate binary string
+            if key not in pdb_dict[pdb_id]['posIdx_binary']:
+                str_wholeComplex = pdb_dict[pdb_id]['posIdx_wholeComplex'][key]
+                str_interface = pdb_dict[pdb_id]['posIdx_interface'][key]
+                str_binary = generate_binary_string(pdb_id, str_wholeComplex, str_interface, pad_length)
+                pdb_dict[pdb_id]['posIdx_binary'][key] = str_binary
 
-        # Generate binary string
-        if key not in pdb_dict[pdb_id]['posIdx_binary']:
-            str_wholeComplex = pdb_dict[pdb_id]['posIdx_wholeComplex'][key]
-            str_interface = pdb_dict[pdb_id]['posIdx_interface'][key]
-            str_binary = generate_binary_string(pdb_id, str_wholeComplex, str_interface, pad_length)
-            pdb_dict[pdb_id]['posIdx_binary'][key] = str_binary
-
-        # Calculate distance map
-        if key not in pdb_dict[pdb_id]['distance']:
-            posIdx_binary_str = pdb_dict[pdb_id]['posIdx_binary'][key]
-            distances = calculate_distance_for_entry(
-                pdb_id, key, posIdx_binary_str,
-                complex_directory_path, pad_length, distance_scale, error_log
-            )
-            if distances is not None:
-                pdb_dict[pdb_id]['distance'][key] = distances
+            # Calculate distance map
+            if key not in pdb_dict[pdb_id]['distance']:
+                posIdx_binary_str = pdb_dict[pdb_id]['posIdx_binary'][key]
+                distances = calculate_distance_for_entry(
+                    pdb_id, key, posIdx_binary_str,
+                    complex_directory_path, pad_length, distance_scale, error_log
+                )
+                if distances is not None:
+                    pdb_dict[pdb_id]['distance'][key] = distances
 
         print(f"Complete {idx+1} out of {len(pdb_files)}")
 
@@ -405,6 +415,7 @@ def main():
     # Split into multiple JSON files
     pdb_ids = list(pdb_dict.keys())
     chunk_size = max(1, len(pdb_ids) // num_json_files + 1)
+    output_files = []
 
     for i in range(num_json_files):
         start = i * chunk_size
@@ -417,12 +428,26 @@ def main():
         with open(output_path, 'w', encoding='utf-8') as json_file:
             json.dump(chunk_data, json_file, indent=4)
 
+        output_files.append(output_path)
         print(f"Saved {output_path} ({len(chunk_ids)} entries)")
 
     print(f"\nPreprocessing complete!")
     print(f"Total entries: {len(pdb_dict)}")
     print(f"Skipped due to length issues: {numLenProblem}")
     print(f"Error log saved to: {error_log_path}")
+
+    return output_files
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Preprocess PDB files to JSON")
+    parser.add_argument("--config", type=str, default="../configs/config.yaml")
+    args = parser.parse_args()
+
+    with open(args.config, 'r', encoding='utf-8') as f:
+        config = yaml.safe_load(f)
+
+    run_preprocessing(config)
 
 
 if __name__ == "__main__":

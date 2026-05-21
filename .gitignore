@@ -72,12 +72,16 @@ json/preprocessed/*.json
 error_log.txt
 wandb/
 lightning_logs/
+csv_output/
+result/
+json/inference/
 
 # -----------------------------------------------------------------------------
 # Sensitive Files
 # -----------------------------------------------------------------------------
-# Don't commit config with real tokens - use template instead
-# configs/config.yaml
+# Don't commit config with real tokens - use config.yaml.template instead.
+# Users should: cp configs/config.yaml.template configs/config.yaml
+configs/config.yaml
 
 # -----------------------------------------------------------------------------
 # OS Files

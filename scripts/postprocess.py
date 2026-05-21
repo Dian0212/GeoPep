@@ -14,7 +14,15 @@ import json
 import ast
 import argparse
 import os
+import sys
 import csv
+
+# Force UTF-8 stdout/stderr so emoji prints don't crash on Windows (gbk codec).
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
 
 def process_softmax_to_binary(softmax_probs):
@@ -57,6 +65,64 @@ def extract_sequences(combined_chain_str):
     protein_seq = protein_part.replace('<pad>', '').replace('<unk>', 'X')
 
     return peptide_seq, protein_seq
+
+
+# Model layout constants — must match the trained model.
+PEPTIDE_LEN = 50
+PROTEIN_LEN = 500
+PROTEIN_START = PEPTIDE_LEN + 1  # +1 for the '|' separator at position 50
+
+
+def _extract_class1_probs(softmax_output):
+    """Pull the raw class-1 (interface/binding) probabilities from a softmax output.
+
+    Accepts either shape (1, 3, 551) [unsqueezed batch] or (3, 551) [already squeezed].
+    Returns a list of 551 floats — the per-position binding probability.
+    """
+    if isinstance(softmax_output, str):
+        softmax_output = ast.literal_eval(softmax_output)
+    # If batched (length-1 outer list), unwrap it
+    if (
+        isinstance(softmax_output, list)
+        and len(softmax_output) == 1
+        and isinstance(softmax_output[0], list)
+        and isinstance(softmax_output[0][0], list)
+    ):
+        softmax_output = softmax_output[0]
+    # Now shape should be (3, 551): [class0_probs, class1_probs, class2_probs]
+    return softmax_output[1]
+
+
+def build_result_entry(combined_str, softmax_output):
+    """Build a result-JSON entry for one peptide-protein sample.
+
+    Strips <pad> from the input sequences and emits matching-length probability
+    strings (space-separated, two-decimal floats) of binding probability per residue.
+
+    Returns dict with peptide_chain, protein_chain, peptide_bindingProbability,
+    protein_bindingProbability — or None if the input is malformed.
+    """
+    peptide_seq, protein_seq = extract_sequences(combined_str)
+    if peptide_seq is None or protein_seq is None:
+        return None
+
+    class1_probs = _extract_class1_probs(softmax_output)
+
+    # Peptide half: positions 0..PEPTIDE_LEN-1 in model output.
+    # Real peptide residues sit at the front; padding is at the tail.
+    # Number of real residues == len(peptide_seq) after pad stripping.
+    pep_probs = class1_probs[:len(peptide_seq)]
+    prot_probs = class1_probs[PROTEIN_START:PROTEIN_START + len(protein_seq)]
+
+    pep_prob_str = ' '.join(f"{p:.2f}" for p in pep_probs)
+    prot_prob_str = ' '.join(f"{p:.2f}" for p in prot_probs)
+
+    return {
+        "peptide_chain": peptide_seq,
+        "protein_chain": protein_seq,
+        "peptide_bindingProbability": pep_prob_str,
+        "protein_bindingProbability": prot_prob_str,
+    }
 
 
 def get_binding_prediction(binary_probs, threshold=0.5):
@@ -110,8 +176,12 @@ def generate_csv_for_sample(pdb_id, chain_key, peptide_seq, protein_seq,
     return peptide_csv_path, protein_csv_path
 
 
-def process_predictions(json_file_path, output_dir=None, threshold=0.5):
-    """Process all predictions in JSON file and optionally generate CSV files."""
+def process_predictions(json_file_path, output_dir=None, threshold=0.5, result_accumulator=None):
+    """Process all predictions in JSON file and optionally generate CSV files.
+
+    If `result_accumulator` is a dict, also fills it with per-sample result entries
+    keyed by `{pdb_id}_{chain_key}` (peptide/protein chains + binding probability strings).
+    """
     with open(json_file_path, 'r', encoding='utf-8') as f:
         data = json.load(f)
 
@@ -152,18 +222,23 @@ def process_predictions(json_file_path, output_dir=None, threshold=0.5):
                     pdb_data["protein_out"][chain_key] = protein_probs
                     processed += 1
 
+                    combined_str = pdb_data.get("combined_chains", {}).get(chain_key, "")
+
                     # Generate CSV files if output_dir is specified
                     if output_dir:
-                        # Get sequences from combined_chains
-                        combined_str = pdb_data.get("combined_chains", {}).get(chain_key, "")
                         peptide_seq, protein_seq = extract_sequences(combined_str)
-
                         if peptide_seq and protein_seq:
                             generate_csv_for_sample(
                                 pdb_id, chain_key, peptide_seq, protein_seq,
                                 peptide_probs, protein_probs, output_dir, threshold
                             )
                             csv_generated += 1
+
+                    # Accumulate result JSON entry
+                    if result_accumulator is not None and combined_str:
+                        entry = build_result_entry(combined_str, softmax_output)
+                        if entry is not None:
+                            result_accumulator[f"{pdb_id}_{chain_key}"] = entry
 
                 except Exception as e:
                     print(f"  Error processing {pdb_id}_{chain_key}: {e}")
@@ -189,17 +264,23 @@ def process_predictions(json_file_path, output_dir=None, threshold=0.5):
                 pdb_data["protein_out"] = protein_probs
                 processed += 1
 
+                combined_str = pdb_data.get("combined_chains", "")
+
                 # Generate CSV files if output_dir is specified
-                if output_dir:
-                    combined_str = pdb_data.get("combined_chains", "")
-                    if isinstance(combined_str, str):
-                        peptide_seq, protein_seq = extract_sequences(combined_str)
-                        if peptide_seq and protein_seq:
-                            generate_csv_for_sample(
-                                pdb_id, "default", peptide_seq, protein_seq,
-                                peptide_probs, protein_probs, output_dir, threshold
-                            )
-                            csv_generated += 1
+                if output_dir and isinstance(combined_str, str):
+                    peptide_seq, protein_seq = extract_sequences(combined_str)
+                    if peptide_seq and protein_seq:
+                        generate_csv_for_sample(
+                            pdb_id, "default", peptide_seq, protein_seq,
+                            peptide_probs, protein_probs, output_dir, threshold
+                        )
+                        csv_generated += 1
+
+                # Accumulate result JSON entry
+                if result_accumulator is not None and isinstance(combined_str, str) and combined_str:
+                    entry = build_result_entry(combined_str, softmax_output)
+                    if entry is not None:
+                        result_accumulator[pdb_id] = entry
 
             except Exception as e:
                 print(f"  Error processing {pdb_id}: {e}")
@@ -213,7 +294,7 @@ def process_predictions(json_file_path, output_dir=None, threshold=0.5):
     return processed, csv_generated
 
 
-def process_directory(input_dir, output_dir=None, threshold=0.5):
+def process_directory(input_dir, output_dir=None, threshold=0.5, result_accumulator=None):
     """Process all JSON files in a directory."""
     json_files = [f for f in os.listdir(input_dir) if f.endswith('.json')]
 
@@ -227,7 +308,9 @@ def process_directory(input_dir, output_dir=None, threshold=0.5):
     total_csv = 0
     for json_file in sorted(json_files):
         json_path = os.path.join(input_dir, json_file)
-        processed, csv_count = process_predictions(json_path, output_dir, threshold)
+        processed, csv_count = process_predictions(
+            json_path, output_dir, threshold, result_accumulator=result_accumulator
+        )
         total_processed += processed
         total_csv += csv_count
 
@@ -238,18 +321,33 @@ def process_directory(input_dir, output_dir=None, threshold=0.5):
     print(f"{'='*60}")
 
 
+def save_result_json(result_accumulator, result_dir, filename="predictions.json"):
+    """Write the accumulated result entries to result_dir/filename."""
+    os.makedirs(result_dir, exist_ok=True)
+    out_path = os.path.join(result_dir, filename)
+    with open(out_path, 'w', encoding='utf-8') as f:
+        json.dump(result_accumulator, f, indent=4)
+    print(f"✅ Saved {len(result_accumulator)} result entries to {out_path}")
+    return out_path
+
+
 def main():
     parser = argparse.ArgumentParser(description="Postprocess predictions and generate CSV files")
     parser.add_argument("--input", type=str, help="Single JSON file to process")
     parser.add_argument("--input-dir", type=str, help="Directory containing JSON files to process")
     parser.add_argument("--output-dir", type=str, help="Directory to save CSV files (if not specified, no CSV files are generated)")
-    parser.add_argument("--threshold", type=float, default=0.5, help="Threshold for binding prediction (default: 0.5)")
+    parser.add_argument("--threshold", type=float, default=0.5, help="Threshold for binding prediction in CSV output (default: 0.5)")
+    parser.add_argument("--result-dir", type=str, help="If set, also write a combined result JSON (peptide/protein chain + binding probabilities, padding stripped) to this directory")
     args = parser.parse_args()
 
+    result_accumulator = {} if args.result_dir else None
+
     if args.input_dir:
-        process_directory(args.input_dir, args.output_dir, args.threshold)
+        process_directory(args.input_dir, args.output_dir, args.threshold,
+                          result_accumulator=result_accumulator)
     elif args.input:
-        process_predictions(args.input, args.output_dir, args.threshold)
+        process_predictions(args.input, args.output_dir, args.threshold,
+                            result_accumulator=result_accumulator)
     else:
         print("Please provide --input or --input-dir")
         print("Example:")
@@ -257,6 +355,11 @@ def main():
         print("  python postprocess.py --input-dir /path/to/json/folder")
         print("  python postprocess.py --input predictions.json --output-dir /path/to/csv/output")
         print("  python postprocess.py --input-dir /path/to/json --output-dir /path/to/csv --threshold 0.6")
+        print("  python postprocess.py --input predictions.json --result-dir ../result")
+        return
+
+    if result_accumulator is not None:
+        save_result_json(result_accumulator, args.result_dir)
 
 
 if __name__ == "__main__":

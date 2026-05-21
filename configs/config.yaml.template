@@ -1,34 +1,40 @@
 # =============================================================================
 # GeoPep Configuration File - TEMPLATE
 # =============================================================================
-# Copy this file to config.yaml and fill in your paths and tokens
+# Copy this file to config.yaml and fill in your paths and HuggingFace token.
+# Both the one-command pipelines (train_pipeline.py / inference_pipeline.py)
+# and the individual scripts (preprocess.py / train.py / predict_esm3.py /
+# postprocess.py) read from the same config.
 # =============================================================================
 
 # -----------------------------------------------------------------------------
-# Preprocessing Settings (PDB → JSON)
+# Preprocessing Settings (PDB -> JSON)
 # -----------------------------------------------------------------------------
 preprocess:
-  # Input PDB directories
+  # Folder of full peptide-protein complex PDB files.
+  # Naming: <PDBID>_<peptide_chain>_<protein_chain>.pdb (e.g. 1abc_A_B.pdb)
   complex_directory: "/path/to/pdb/complex"
+
+  # Folder of interface-only PDB files (same filenames as complex/).
+  # For inference-only runs you can leave this blank or pointing to a
+  # non-existent path; preprocess will skip interface/distance fields.
   interface_directory: "/path/to/pdb/interface"
 
-  # Output JSON directory
+  # Where to dump the preprocessed data_part_*.json files.
   output_directory: "/path/to/json/preprocessed"
 
-  # Number of JSON files to split output into
+  # Number of JSON shards to split the dataset into.
   num_json_files: 5
 
 # -----------------------------------------------------------------------------
-# Data Settings
+# Data Settings (used by training)
 # -----------------------------------------------------------------------------
 data:
-  # Training data (JSON files from preprocessing)
   train_json:
     - "/path/to/json/preprocessed/data_part_1.json"
     - "/path/to/json/preprocessed/data_part_2.json"
     - "/path/to/json/preprocessed/data_part_3.json"
 
-  # Validation data
   val_json:
     - "/path/to/json/preprocessed/data_part_4.json"
 
@@ -38,7 +44,7 @@ data:
 model:
   peptide_len: 50
   protein_len: 500
-  num_label_types: 3
+  num_label_types: 3   # 0=non-interface, 1=interface, 2=padding
 
 # -----------------------------------------------------------------------------
 # Training Settings
@@ -49,36 +55,50 @@ training:
   max_epochs: 100
   use_distance_loss: true
 
+  # Where to write trained checkpoints. The CLI flag --output-dir on
+  # train_pipeline.py overrides this at runtime.
+  checkpoint_dir: "./model_weights"
+
+  # Optional: filename pattern (default works) / how many top-k to keep.
+  # checkpoint_filename: "model-{epoch:02d}"
+  # save_top_k: 1
+  # num_workers: 4
+
 # -----------------------------------------------------------------------------
 # Prediction Settings
 # -----------------------------------------------------------------------------
 prediction:
-  # Model checkpoint path
-  checkpoint_path: "/path/to/model_weights/model-epoch=01.ckpt"
+  # Trained model to load for inference. The CLI flag --checkpoint on
+  # inference_pipeline.py overrides this at runtime.
+  checkpoint_path: "/path/to/model_weights/model_distanceLoss.ckpt"
 
-  # Input JSON file for prediction
+  # JSON to predict on (output of preprocess). The pipeline writes
+  # model_out_softmax / model_out_argmax back into this same file.
   input_json: "/path/to/json/preprocessed/data_part_5.json"
 
-  # Field name containing input sequence
+  # Field name inside the JSON that holds the input sequence.
   input_field: "combined_chains"
 
-  # Device: "cuda" or "cpu"
+  # "cuda" or "cpu"
   device: "cuda"
 
 # -----------------------------------------------------------------------------
-# Hardware Settings
+# Hardware Settings (training)
 # -----------------------------------------------------------------------------
 hardware:
-  # GPUs to use for training (list of GPU IDs)
-  gpus: [0]
-
-  # Precision: 16 or 32
-  precision: 16
+  gpus: [0]         # list of GPU device ids
+  precision: 16     # 16 (mixed precision) or 32
 
 # -----------------------------------------------------------------------------
 # HuggingFace Settings
 # -----------------------------------------------------------------------------
 huggingface:
-  # HuggingFace access token for downloading gated models (e.g., ESM3)
-  # Get your token from: https://huggingface.co/settings/tokens
+  # ESM3 is gated; create a token at https://huggingface.co/settings/tokens
+  # and grant it access to the EvolutionaryScale/esm3 repository.
+  #
+  # You can leave the placeholder below; the scripts will fall back to:
+  #   1. the HF_TOKEN environment variable, then
+  #   2. an interactive prompt at runtime
+  # IMPORTANT: never commit a real token. config.yaml is gitignored for this
+  # reason -- only this template is tracked.
   token: "hf_your_token_here"
