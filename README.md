@@ -10,20 +10,22 @@ GeoPep predicts which residues of a protein bind a given peptide. It combines th
 
 1. [Quick Start (one command)](#quick-start)
 2. [Installation](#installation)
-3. [Project Structure](#project-structure)
-4. [HuggingFace Token](#huggingface-token)
-5. [Configuration](#configuration)
-6. [End-to-End Pipelines](#end-to-end-pipelines)
-7. [Step-by-Step Usage](#step-by-step-usage)
-8. [Data Format](#data-format)
-9. [Architecture](#architecture)
-10. [Troubleshooting](#troubleshooting)
+3. [Download the Trained Model](#download-the-trained-model)
+4. [Project Structure](#project-structure)
+5. [HuggingFace Token](#huggingface-token)
+6. [Configuration](#configuration)
+7. [End-to-End Pipelines](#end-to-end-pipelines)
+8. [Step-by-Step Usage](#step-by-step-usage)
+9. [Data Format](#data-format)
+10. [Architecture](#architecture)
+11. [Troubleshooting](#troubleshooting)
 
 ---
 
 ## Quick Start
 
-After [installation](#installation) and [HF token setup](#huggingface-token):
+After [installation](#installation), [HF token setup](#huggingface-token), and
+[downloading the trained model](#download-the-trained-model):
 
 ```bash
 cd scripts
@@ -38,6 +40,27 @@ python inference_pipeline.py \
 ```
 
 The training pipeline saves a checkpoint to `model_weights/`. The inference pipeline writes per-residue binding probabilities to `result/predictions.json`.
+
+---
+
+## Download the Trained Model
+
+The trained checkpoint (~16 GB) is hosted on Hugging Face Hub at
+[**dchenqwer/geopep**](https://huggingface.co/dchenqwer/geopep). Pull it into
+the `model_weights/` directory:
+
+```bash
+pip install -U huggingface_hub
+hf download dchenqwer/geopep model_distanceLoss.ckpt \
+    --local-dir model_weights/
+```
+
+After this you should have `model_weights/model_distanceLoss.ckpt`, ready to
+use with `inference_pipeline.py`.
+
+> If `hf` is not on PATH, use the deprecated alias `huggingface-cli download …`
+> with the same arguments, or run `python -m huggingface_hub` to confirm the
+> package is installed.
 
 ---
 
