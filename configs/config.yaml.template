@@ -1,29 +1,27 @@
 # =============================================================================
 # GeoPep Configuration File - TEMPLATE
 # =============================================================================
-# Copy this file to config.yaml and fill in your paths and HuggingFace token.
-# Both the one-command pipelines (train_pipeline.py / inference_pipeline.py)
-# and the individual scripts (preprocess.py / train.py / predict_esm3.py /
-# postprocess.py) read from the same config.
+# Copy this file to config.yaml and fill in your HuggingFace token.
+#
+# All paths below are interpreted as RELATIVE TO THE PROJECT ROOT (the parent
+# directory of this configs/ folder). Absolute paths are also accepted.
+# CLI flags on train_pipeline.py / inference_pipeline.py override the relevant
+# fields at runtime.
 # =============================================================================
 
 # -----------------------------------------------------------------------------
 # Preprocessing Settings (PDB -> JSON)
 # -----------------------------------------------------------------------------
 preprocess:
-  # Folder of full peptide-protein complex PDB files.
   # Naming: <PDBID>_<peptide_chain>_<protein_chain>.pdb (e.g. 1abc_A_B.pdb)
-  complex_directory: "/path/to/pdb/complex"
+  complex_directory: "pdb/complex"
 
-  # Folder of interface-only PDB files (same filenames as complex/).
-  # For inference-only runs you can leave this blank or pointing to a
-  # non-existent path; preprocess will skip interface/distance fields.
-  interface_directory: "/path/to/pdb/interface"
+  # Interface-only PDB files (same filenames as complex/). Leave blank or set
+  # to a non-existent path to run preprocess in inference-only mode (skips
+  # interface labels and distance maps).
+  interface_directory: "pdb/interface"
 
-  # Where to dump the preprocessed data_part_*.json files.
-  output_directory: "/path/to/json/preprocessed"
-
-  # Number of JSON shards to split the dataset into.
+  output_directory: "json/preprocessed"
   num_json_files: 5
 
 # -----------------------------------------------------------------------------
@@ -31,15 +29,14 @@ preprocess:
 # -----------------------------------------------------------------------------
 data:
   train_json:
-    - "/path/to/json/preprocessed/data_part_1.json"
-    - "/path/to/json/preprocessed/data_part_2.json"
-    - "/path/to/json/preprocessed/data_part_3.json"
-
+    - "json/preprocessed/data_part_1.json"
+    - "json/preprocessed/data_part_2.json"
+    - "json/preprocessed/data_part_3.json"
   val_json:
-    - "/path/to/json/preprocessed/data_part_4.json"
+    - "json/preprocessed/data_part_4.json"
 
 # -----------------------------------------------------------------------------
-# Model Settings
+# Model Settings (don't change — these define the architecture)
 # -----------------------------------------------------------------------------
 model:
   peptide_len: 50
@@ -55,46 +52,36 @@ training:
   max_epochs: 100
   use_distance_loss: true
 
-  # Where to write trained checkpoints. The CLI flag --output-dir on
-  # train_pipeline.py overrides this at runtime.
-  checkpoint_dir: "./model_weights"
+  # Where trained checkpoints land. CLI --output-dir on train_pipeline.py overrides this.
+  checkpoint_dir: "model_weights"
 
-  # Optional: filename pattern (default works) / how many top-k to keep.
+  # Optional knobs (defaults are usually fine):
   # checkpoint_filename: "model-{epoch:02d}"
   # save_top_k: 1
   # num_workers: 4
 
 # -----------------------------------------------------------------------------
-# Prediction Settings
+# Prediction Settings (used by predict_esm3.py when run standalone)
 # -----------------------------------------------------------------------------
 prediction:
-  # Trained model to load for inference. The CLI flag --checkpoint on
-  # inference_pipeline.py overrides this at runtime.
-  checkpoint_path: "/path/to/model_weights/model_distanceLoss.ckpt"
-
-  # JSON to predict on (output of preprocess). The pipeline writes
-  # model_out_softmax / model_out_argmax back into this same file.
-  input_json: "/path/to/json/preprocessed/data_part_5.json"
-
-  # Field name inside the JSON that holds the input sequence.
+  checkpoint_path: "model_weights/model_distanceLoss.ckpt"
+  input_json: "json/preprocessed/data_part_5.json"
   input_field: "combined_chains"
-
-  # "cuda" or "cpu"
   device: "cuda"
 
 # -----------------------------------------------------------------------------
-# Hardware Settings (training)
+# Hardware Settings
 # -----------------------------------------------------------------------------
 hardware:
-  gpus: [0]         # list of GPU device ids
-  precision: 16     # 16 (mixed precision) or 32
+  gpus: [0]      # list of GPU device ids; e.g. [0, 1, 2, 3] for 4 GPUs
+  precision: 16  # 16 (mixed precision) or 32
 
 # -----------------------------------------------------------------------------
 # HuggingFace Settings
 # -----------------------------------------------------------------------------
 huggingface:
-  # ESM3 is gated; create a token at https://huggingface.co/settings/tokens
-  # and grant it access to the EvolutionaryScale/esm3 repository.
+  # ESM3 is gated. Get a token at https://huggingface.co/settings/tokens and
+  # accept the model TOS at https://huggingface.co/EvolutionaryScale/esm3-sm-open-v1
   #
   # You can leave the placeholder below; the scripts will fall back to:
   #   1. the HF_TOKEN environment variable, then

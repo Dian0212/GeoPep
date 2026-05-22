@@ -10,11 +10,15 @@ Usage:
 """
 
 import os
+import sys
 import json
 import argparse
 import yaml
 import numpy as np
 from Bio.PDB import PDBParser
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
+from geopep.config_utils import resolve_paths
 
 # Atomic masses for common elements (in atomic mass units, amu)
 atomic_masses = {
@@ -446,6 +450,7 @@ def main():
 
     with open(args.config, 'r', encoding='utf-8') as f:
         config = yaml.safe_load(f)
+    resolve_paths(config, args.config)
 
     run_preprocessing(config)
 

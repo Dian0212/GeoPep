@@ -27,6 +27,7 @@ import lightning as L
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 from geopep.hf_auth import resolve_hf_token
+from geopep.config_utils import resolve_paths
 
 
 class esm3_KAN(L.LightningModule):
@@ -282,6 +283,7 @@ def main():
 
     with open(args.config, 'r', encoding='utf-8') as f:
         config = yaml.safe_load(f)
+    resolve_paths(config, args.config)
 
     print(f"Config: {args.config}")
     run_prediction(config)

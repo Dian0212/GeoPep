@@ -20,6 +20,7 @@ from geopep.models import ESM3KAN
 from geopep.data import PeptideComplexDataset
 from geopep.data.dataset import collate_fn
 from geopep.hf_auth import resolve_hf_token
+from geopep.config_utils import resolve_paths
 
 
 def run_training(config):
@@ -112,6 +113,7 @@ def main():
 
     with open(args.config, 'r', encoding='utf-8') as f:
         config = yaml.safe_load(f)
+    resolve_paths(config, args.config)
 
     print(f"Config: {args.config}")
     run_training(config)

@@ -38,9 +38,12 @@ for _stream in (sys.stdout, sys.stderr):
     except Exception:
         pass
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
+
 from preprocess import run_preprocessing
 from predict_esm3 import run_prediction
 from postprocess import process_predictions, save_result_json
+from geopep.config_utils import resolve_paths
 
 
 def _resolve_complex_dir(pdb_dir: str) -> str:
@@ -130,6 +133,7 @@ def main():
     # --- Load base config ---
     with open(config_path, "r", encoding="utf-8") as f:
         config = yaml.safe_load(f)
+    resolve_paths(config, config_path)
 
     # --- Override preprocess section (inference-only: no interface dir) ---
     config.setdefault("preprocess", {})
