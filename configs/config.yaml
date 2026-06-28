@@ -1,0 +1,83 @@
+# =============================================================================
+# GeoPep Configuration File
+# =============================================================================
+# All paths below are interpreted as RELATIVE TO THE PROJECT ROOT (the parent
+# directory of this configs/ folder). Absolute paths are also accepted.
+# CLI flags on the one-command pipelines override the relevant fields.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Preprocessing Settings (PDB -> JSON)
+# -----------------------------------------------------------------------------
+preprocess:
+  # Input PDB directories (relative to project root)
+  complex_directory: "pdb/complex"
+  interface_directory: "pdb/interface"
+
+  # Output JSON directory
+  output_directory: "json/preprocessed"
+
+  # Number of JSON files to split output into
+  num_json_files: 5
+
+# -----------------------------------------------------------------------------
+# Data Settings (used by train.py when run standalone)
+# -----------------------------------------------------------------------------
+data:
+  train_json:
+    - "json/preprocessed/data_part_1.json"
+    - "json/preprocessed/data_part_2.json"
+    - "json/preprocessed/data_part_3.json"
+  val_json:
+    - "json/preprocessed/data_part_4.json"
+
+# -----------------------------------------------------------------------------
+# Model Settings (don't change — these define the architecture)
+# -----------------------------------------------------------------------------
+model:
+  peptide_len: 50
+  protein_len: 500
+  num_label_types: 3
+
+# -----------------------------------------------------------------------------
+# Training Settings
+# -----------------------------------------------------------------------------
+training:
+  batch_size: 4
+  learning_rate: 0.0001
+  max_epochs: 2
+  use_distance_loss: true
+
+  # Where trained checkpoints land. CLI --output-dir on train_pipeline.py overrides this.
+  checkpoint_dir: "model_weights"
+
+# -----------------------------------------------------------------------------
+# Prediction Settings (used by predict_esm3.py when run standalone)
+# -----------------------------------------------------------------------------
+prediction:
+  checkpoint_path: "model_weights/model_distanceLoss.ckpt"
+  input_json: "json/preprocessed/data_part_1 copy.json"
+
+  # Field name inside the JSON that holds the input sequence
+  input_field: "combined_chains"
+
+  # "cuda" or "cpu"
+  device: "cuda"
+
+# -----------------------------------------------------------------------------
+# Hardware Settings
+# -----------------------------------------------------------------------------
+hardware:
+  gpus: [0]      # list of GPU device ids; e.g. [0, 1, 2, 3] for 4 GPUs
+  precision: 16  # 16 (mixed precision) or 32
+
+# -----------------------------------------------------------------------------
+# HuggingFace Settings
+# -----------------------------------------------------------------------------
+huggingface:
+  # ESM3 is gated. Get a token at https://huggingface.co/settings/tokens and
+  # accept the model TOS at https://huggingface.co/EvolutionaryScale/esm3-sm-open-v1
+  #
+  # Leaving the placeholder below is fine — scripts fall back to the HF_TOKEN
+  # env var, then prompt interactively.
+  token: "your_huggingface_token_here"
